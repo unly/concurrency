@@ -115,7 +115,17 @@ func (r *run) start() {
 		r.counter <- struct{}{}
 		r.wg.Add(1)
 
-		go r.runTask(task)
+		select {
+		case <-r.ctx.Done():
+			// don't start tasks if already aborted
+			r.outcomes <- outcome{
+				task: task,
+				err:  r.ctx.Err(),
+			}
+			r.finishTask(task)
+		default:
+			go r.runTask(task)
+		}
 	}
 
 	r.wg.Wait()

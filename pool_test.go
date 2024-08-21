@@ -134,6 +134,25 @@ func TestTaskPool_FirstAwait(t *testing.T) {
 		assert.True(t, (errors.Is(res, err1) && !errors.Is(res, err2)) || (errors.Is(res, err2) && !errors.Is(res, err1)))
 	})
 
+	t.Run("don't start tasks if already aborted", func(t *testing.T) {
+		task1 := NewTask(func(_ context.Context) error {
+			return err1
+		})
+		task2 := NewTask(func(_ context.Context) error {
+			time.Sleep(time.Millisecond)
+			return nil
+		}, task1)
+		task3 := NewTask(func(_ context.Context) error {
+			t.Fatal()
+			return err2
+		}, task2)
+
+		res := NewTaskPool().FirstAwait(context.TODO(), []*Task{task1, task2, task3})
+
+		assert.ErrorIs(t, res, err1)
+		assert.Equal(t, context.Canceled, res.GetResult(task3))
+	})
+
 	t.Run("no errors", func(t *testing.T) {
 		task1 := NewTask(func(_ context.Context) error {
 			return nil
