@@ -37,16 +37,16 @@ func WithTimeout(timeout time.Duration) Option {
 
 var defaultPool = NewTaskPool()
 
-func AwaitAll(ctx context.Context, tasks []*Task) *Result {
-	return defaultPool.AwaitAll(ctx, tasks)
+func AwaitAll(ctx context.Context, tasks ...*Task) *Result {
+	return defaultPool.AwaitAll(ctx, tasks...)
 }
 
-func First(ctx context.Context, tasks []*Task) *Result {
-	return defaultPool.First(ctx, tasks)
+func First(ctx context.Context, tasks ...*Task) *Result {
+	return defaultPool.First(ctx, tasks...)
 }
 
-func FirstAwait(ctx context.Context, tasks []*Task) *Result {
-	return defaultPool.FirstAwait(ctx, tasks)
+func FirstAwait(ctx context.Context, tasks ...*Task) *Result {
+	return defaultPool.FirstAwait(ctx, tasks...)
 }
 
 func NewTaskPool(options ...Option) *TaskPool {
@@ -62,15 +62,15 @@ type TaskPool struct {
 	config TaskPoolConfig
 }
 
-func (tp *TaskPool) AwaitAll(ctx context.Context, tasks []*Task) *Result {
+func (tp *TaskPool) AwaitAll(ctx context.Context, tasks ...*Task) *Result {
 	return newRun(tp, modeWaitAll, ctx, tasks).run()
 }
 
-func (tp *TaskPool) First(ctx context.Context, tasks []*Task) *Result {
+func (tp *TaskPool) First(ctx context.Context, tasks ...*Task) *Result {
 	return newRun(tp, modeAbortFirst, ctx, tasks).run()
 }
 
-func (tp *TaskPool) FirstAwait(ctx context.Context, tasks []*Task) *Result {
+func (tp *TaskPool) FirstAwait(ctx context.Context, tasks ...*Task) *Result {
 	return newRun(tp, modeAbortFirstWait, ctx, tasks).run()
 }
 

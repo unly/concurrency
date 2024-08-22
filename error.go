@@ -3,6 +3,7 @@ package concurrency
 import (
 	"errors"
 	"fmt"
+	"runtime/debug"
 )
 
 type PanicError struct {
@@ -49,6 +50,10 @@ func (r *Result) Error() string {
 }
 
 func (r *Result) Unwrap() error {
+	if r == nil {
+		debug.PrintStack()
+		panic(r)
+	}
 	return r.Combined
 }
 
