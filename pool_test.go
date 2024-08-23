@@ -44,15 +44,17 @@ func TestTaskPool_AwaitAll(t *testing.T) {
 	})
 
 	t.Run("with timeout", func(t *testing.T) {
+		done := make(chan struct{})
 		task1 := NewTask(func(_ context.Context) error {
 			return nil
 		})
 		task2 := NewTask(func(_ context.Context) error {
-			time.Sleep(time.Millisecond)
+			<-done
 			return nil
 		})
 
 		res := NewTaskPool(WithTimeout(time.Nanosecond)).AwaitAll(context.TODO(), task1, task2)
+		close(done)
 
 		assert.ErrorIs(t, res, ErrTimeout)
 	})
@@ -167,15 +169,17 @@ func TestTaskPool_FirstAwait(t *testing.T) {
 	})
 
 	t.Run("with timeout", func(t *testing.T) {
+		done := make(chan struct{})
 		task1 := NewTask(func(_ context.Context) error {
 			return nil
 		})
 		task2 := NewTask(func(_ context.Context) error {
-			time.Sleep(time.Millisecond)
+			<-done
 			return nil
 		})
 
 		res := NewTaskPool(WithTimeout(time.Nanosecond)).FirstAwait(context.TODO(), task1, task2)
+		close(done)
 
 		assert.ErrorIs(t, res, ErrTimeout)
 	})
@@ -279,15 +283,17 @@ func TestTaskPool_First(t *testing.T) {
 	})
 
 	t.Run("with timeout", func(t *testing.T) {
+		done := make(chan struct{})
 		task1 := NewTask(func(_ context.Context) error {
 			return nil
 		})
 		task2 := NewTask(func(_ context.Context) error {
-			time.Sleep(time.Millisecond)
+			<-done
 			return nil
 		})
 
 		res := NewTaskPool(WithTimeout(time.Nanosecond)).First(context.TODO(), task1, task2)
+		close(done)
 
 		assert.ErrorIs(t, res, ErrTimeout)
 	})
