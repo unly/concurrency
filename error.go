@@ -10,67 +10,61 @@ type PanicError struct {
 	Stack []byte
 }
 
-func (e PanicError) Error() string {
+func (e *PanicError) Error() string {
 	return fmt.Sprintf("panic: %v", e.Val)
 }
 
-func (e PanicError) As(v any) bool {
-	other, ok := v.(*PanicError)
-	if !ok {
-		return false
-	}
-
-	other.Val = e.Val
-	other.Stack = e.Stack
-	return true
-}
-
-func newResult() *Result {
-	return &Result{
+func newResult() *ResultError {
+	return &ResultError{
 		Errors: make(map[*Task]error),
 	}
 }
 
-type Result struct {
-	Errors   map[*Task]error
-	Combined error
+// ResultError contains a map including all errors occurred based on
+// their respective Task.
+type ResultError struct {
+	// Errors map of all errors occurred
+	Errors map[*Task]error
+	// Err is the overall error used for the Error method
+	Err error
 }
 
-func (r *Result) GetResult(t *Task) error {
+func (r *ResultError) GetResult(t *Task) error {
 	return r.Errors[t]
 }
 
-func (r *Result) Error() string {
-	if r.Combined == nil {
+func (r *ResultError) Error() string {
+	if r.Err == nil {
 		return ""
 	}
 
-	return r.Combined.Error()
+	return r.Err.Error()
 }
 
-func (r *Result) Unwrap() error {
-	return r.Combined
-}
-
-func (r *Result) setError(err error) {
-	if r.Combined == nil {
-		r.Combined = err
+func (r *ResultError) Unwrap() []error {
+	errs := make([]error, 0, len(r.Errors)+1)
+	for _, v := range r.Errors {
+		errs = append(errs, v)
 	}
+	if r.Err != nil {
+		errs = append(errs, r.Err)
+	}
+	return errs
 }
 
-func (r *Result) build() *Result {
-	if r.Combined != nil {
+func (r *ResultError) build() *ResultError {
+	if r.Err != nil {
 		return r
 	}
 
-	if len(r.Errors) > 0 {
-		errs := make([]error, 0, len(r.Errors))
-		for _, v := range r.Errors {
-			errs = append(errs, v)
-		}
-		r.Combined = errors.Join(errs...)
-		return r
+	if len(r.Errors) == 0 {
+		return nil
 	}
 
-	return nil
+	errs := make([]error, 0, len(r.Errors))
+	for _, v := range r.Errors {
+		errs = append(errs, v)
+	}
+	r.Err = errors.Join(errs...)
+	return r
 }

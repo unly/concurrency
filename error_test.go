@@ -24,37 +24,16 @@ func TestPanicError_Error(t *testing.T) {
 	})
 }
 
-func TestPanicError_As(t *testing.T) {
-	t.Run("other panic error", func(t *testing.T) {
-		err := PanicError{
-			Val: 42,
-		}
-
-		var p PanicError
-		assert.True(t, err.As(&p))
-		assert.Equal(t, 42, p.Val)
-	})
-
-	t.Run("no panic error", func(t *testing.T) {
-		err := PanicError{
-			Val: 42,
-		}
-
-		e := assert.AnError
-		assert.False(t, err.As(&e))
-	})
-}
-
 func TestResult_Error(t *testing.T) {
 	t.Run("empty result", func(t *testing.T) {
-		err := &Result{}
+		err := &ResultError{}
 
 		assert.Empty(t, err.Error())
 	})
 
 	t.Run("with underlying error", func(t *testing.T) {
-		err := &Result{
-			Combined: assert.AnError,
+		err := &ResultError{
+			Err: assert.AnError,
 		}
 
 		assert.Equal(t, assert.AnError.Error(), err.Error())
@@ -63,23 +42,35 @@ func TestResult_Error(t *testing.T) {
 
 func TestResult_Unwrap(t *testing.T) {
 	t.Run("empty result", func(t *testing.T) {
-		err := &Result{}
+		err := &ResultError{}
 
-		assert.Nil(t, err.Unwrap())
+		assert.Len(t, err.Unwrap(), 0)
 	})
 
 	t.Run("with underlying error", func(t *testing.T) {
-		err := &Result{
-			Combined: assert.AnError,
+		err := &ResultError{
+			Err: assert.AnError,
 		}
 
 		assert.ErrorIs(t, err, assert.AnError)
+	})
+
+	t.Run("map of errors", func(t *testing.T) {
+		err := &ResultError{
+			Errors: map[*Task]error{
+				NewTask(nil): assert.AnError,
+				NewTask(nil): assert.AnError,
+				NewTask(nil): assert.AnError,
+			},
+		}
+
+		assert.Len(t, err.Unwrap(), 3)
 	})
 }
 
 func TestResult_GetResult(t *testing.T) {
 	t.Run("empty result", func(t *testing.T) {
-		err := &Result{}
+		err := &ResultError{}
 
 		assert.Nil(t, err.GetResult(&Task{}))
 	})
@@ -87,7 +78,7 @@ func TestResult_GetResult(t *testing.T) {
 	t.Run("empty result", func(t *testing.T) {
 		task1 := &Task{}
 		task2 := &Task{}
-		err := &Result{
+		err := &ResultError{
 			Errors: map[*Task]error{
 				task1: assert.AnError,
 			},
@@ -98,7 +89,7 @@ func TestResult_GetResult(t *testing.T) {
 
 	t.Run("error for task", func(t *testing.T) {
 		task1 := &Task{}
-		err := &Result{
+		err := &ResultError{
 			Errors: map[*Task]error{
 				task1: assert.AnError,
 			},

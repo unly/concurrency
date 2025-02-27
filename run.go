@@ -6,16 +6,17 @@ import (
 	"runtime/debug"
 	"slices"
 	"sync"
+	"time"
 )
 
-func newRun(tp *TaskPool, mode mode, ctx context.Context, tasks []*Task) *run {
+func newRun(ctx context.Context, tp *TaskPool, ctrl Controller, tasks []*Task) *run {
 	ctx, cancel := context.WithCancel(ctx)
 	next := make(chan *Task, len(tasks))
 	return &run{
 		pool:     tp,
 		ctx:      ctx,
 		cancel:   cancel,
-		mode:     mode,
+		ctrl:     ctrl,
 		result:   newResult(),
 		tasks:    tasks,
 		outcomes: make(chan outcome, len(tasks)),
@@ -27,6 +28,14 @@ func newRun(tp *TaskPool, mode mode, ctx context.Context, tasks []*Task) *run {
 		dependsOn:    make(map[*Task][]*Task),
 		revDependsOn: make(map[*Task][]*Task),
 	}
+}
+
+func createTimeoutChannel(tp *TaskPool) <-chan time.Time {
+	if tp.config.Timeout == 0 {
+		return nil
+	}
+
+	return time.After(tp.config.Timeout)
 }
 
 func createSemaphoreChannel(tp *TaskPool, tasks []*Task) chan struct{} {
@@ -42,8 +51,8 @@ type run struct {
 	pool         *TaskPool
 	ctx          context.Context
 	cancel       context.CancelFunc
-	result       *Result
-	mode         mode
+	result       *ResultError
+	ctrl         Controller
 	tasks        []*Task
 	outcomes     chan outcome
 	next         chan *Task
@@ -55,16 +64,16 @@ type run struct {
 	revDependsOn map[*Task][]*Task
 }
 
-func (r *run) run() *Result {
+func (r *run) run() *ResultError {
 	defer r.cancel()
 
 	go r.start()
 
-	timeout := r.pool.timeout()
+	timeout := createTimeoutChannel(r.pool)
 	for {
 		select {
 		case <-timeout:
-			r.result.setError(ErrTimeout)
+			r.result.Err = ErrTimeout
 			return r.result.build()
 		case out, open := <-r.outcomes:
 			if !open {
@@ -78,23 +87,19 @@ func (r *run) run() *Result {
 	}
 }
 
-func (r *run) handleOutcome(out outcome) (abort bool) {
+func (r *run) handleOutcome(out outcome) bool {
+	r.finishTask(out.task)
+
 	if out.err == nil {
 		return false
 	}
 
 	r.result.Errors[out.task] = out.err
 
-	switch r.mode {
-	case modeWaitAll:
-		// nothing to do
-	case modeAbortFirst:
-		abort = true
+	abort := r.ctrl.EarlyAbort(r.ctx, out.task, out.err)
+	if abort || r.ctrl.Cancel(r.ctx, out.task, out.err) {
 		r.cancel()
-		r.result.setError(fmt.Errorf("first error: %w", out.err))
-	case modeAbortFirstWait:
-		r.cancel()
-		r.result.setError(fmt.Errorf("first error: %w", out.err))
+		r.result.Err = fmt.Errorf("canceled after: %w", out.err)
 	}
 
 	return abort
@@ -111,9 +116,9 @@ func (r *run) start() {
 	// build dependencies and reversed dependencies
 	r.buildDependencies()
 
+	r.wg.Add(len(r.tasks))
 	for task := range r.next {
 		r.counter <- struct{}{}
-		r.wg.Add(1)
 
 		select {
 		case <-r.ctx.Done():
@@ -122,7 +127,6 @@ func (r *run) start() {
 				task: task,
 				err:  r.ctx.Err(),
 			}
-			r.finishTask(task)
 		default:
 			go r.runTask(task)
 		}
@@ -143,7 +147,6 @@ func (r *run) runTask(task *Task) {
 				},
 			}
 		}
-		r.finishTask(task)
 	}()
 
 	r.outcomes <- outcome{
