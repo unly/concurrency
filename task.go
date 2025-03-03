@@ -5,7 +5,8 @@ import (
 )
 
 // Func actual function to execute concurrently. Should react
-// to the given context.
+// to the potential cancellation of the given context. Returned
+// errors will be routed to the used Controller.
 type Func func(ctx context.Context) error
 
 type Task struct {

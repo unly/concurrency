@@ -24,7 +24,7 @@ func TestTaskPool_AwaitAll(t *testing.T) {
 			return err2
 		})
 
-		res := NewTaskPool().AwaitAll(context.TODO(), task1, task2)
+		res := NewTaskPool().AwaitAll(context.TODO(), []*Task{task1, task2})
 
 		assert.ErrorIs(t, res, err1)
 		assert.ErrorIs(t, res, err2)
@@ -38,7 +38,7 @@ func TestTaskPool_AwaitAll(t *testing.T) {
 			return nil
 		})
 
-		res := NewTaskPool().AwaitAll(context.TODO(), task1, task2)
+		res := NewTaskPool().AwaitAll(context.TODO(), []*Task{task1, task2})
 
 		assert.Nil(t, res)
 	})
@@ -53,7 +53,7 @@ func TestTaskPool_AwaitAll(t *testing.T) {
 			return nil
 		})
 
-		res := NewTaskPool(WithTimeout(time.Nanosecond)).AwaitAll(context.TODO(), task1, task2)
+		res := NewTaskPool(WithTimeout(time.Nanosecond)).AwaitAll(context.TODO(), []*Task{task1, task2})
 		close(done)
 
 		assert.ErrorIs(t, res, ErrTimeout)
@@ -71,7 +71,7 @@ func TestTaskPool_AwaitAll(t *testing.T) {
 			return nil
 		})
 
-		res := NewTaskPool(WithMaxConcurrency(1)).AwaitAll(context.TODO(), task1, task2)
+		res := NewTaskPool(WithMaxConcurrency(1)).AwaitAll(context.TODO(), []*Task{task1, task2})
 
 		assert.Nil(t, res)
 		assert.Len(t, order, 2)
@@ -90,7 +90,7 @@ func TestTaskPool_AwaitAll(t *testing.T) {
 			return nil
 		}, task1)
 
-		res := NewTaskPool().AwaitAll(context.TODO(), task2, task1)
+		res := NewTaskPool().AwaitAll(context.TODO(), []*Task{task2, task1})
 
 		assert.Nil(t, res)
 		assert.Len(t, order, 2)
@@ -99,7 +99,7 @@ func TestTaskPool_AwaitAll(t *testing.T) {
 	})
 
 	t.Run("no tasks", func(t *testing.T) {
-		res := NewTaskPool().AwaitAll(context.TODO())
+		res := NewTaskPool().AwaitAll(context.TODO(), nil)
 
 		assert.Nil(t, res)
 	})
@@ -112,10 +112,10 @@ func TestTaskPool_AwaitAll(t *testing.T) {
 			return nil
 		})
 
-		res := NewTaskPool().AwaitAll(context.TODO(), task1, task2)
+		res := NewTaskPool().AwaitAll(context.TODO(), []*Task{task1, task2})
 
 		assert.Error(t, res)
-		var panicErr PanicError
+		var panicErr *PanicError
 		assert.ErrorAs(t, res, &panicErr)
 		assert.Equal(t, 42, panicErr.Val)
 		assert.NotEmpty(t, panicErr.Stack)
@@ -131,9 +131,9 @@ func TestTaskPool_FirstAwait(t *testing.T) {
 			return err2
 		})
 
-		res := NewTaskPool().FirstAwait(context.TODO(), task1, task2)
+		res := NewTaskPool().CancelFistError(context.TODO(), []*Task{task1, task2})
 
-		assert.True(t, (errors.Is(res, err1) && !errors.Is(res, err2)) || (errors.Is(res, err2) && !errors.Is(res, err1)))
+		assert.True(t, errors.Is(res, err1) && errors.Is(res, err2))
 	})
 
 	t.Run("don't start tasks if already aborted", func(t *testing.T) {
@@ -149,7 +149,7 @@ func TestTaskPool_FirstAwait(t *testing.T) {
 			return err2
 		}, task2)
 
-		res := NewTaskPool().FirstAwait(context.TODO(), task1, task2, task3)
+		res := NewTaskPool().CancelFistError(context.TODO(), []*Task{task1, task2, task3})
 
 		assert.ErrorIs(t, res, err1)
 		assert.Equal(t, context.Canceled, res.GetResult(task3))
@@ -163,7 +163,7 @@ func TestTaskPool_FirstAwait(t *testing.T) {
 			return nil
 		})
 
-		res := NewTaskPool().FirstAwait(context.TODO(), task1, task2)
+		res := NewTaskPool().CancelFistError(context.TODO(), []*Task{task1, task2})
 
 		assert.Nil(t, res)
 	})
@@ -178,7 +178,7 @@ func TestTaskPool_FirstAwait(t *testing.T) {
 			return nil
 		})
 
-		res := NewTaskPool(WithTimeout(time.Nanosecond)).FirstAwait(context.TODO(), task1, task2)
+		res := NewTaskPool(WithTimeout(time.Nanosecond)).CancelFistError(context.TODO(), []*Task{task1, task2})
 		close(done)
 
 		assert.ErrorIs(t, res, ErrTimeout)
@@ -196,7 +196,7 @@ func TestTaskPool_FirstAwait(t *testing.T) {
 			return nil
 		})
 
-		res := NewTaskPool(WithMaxConcurrency(1)).FirstAwait(context.TODO(), task1, task2)
+		res := NewTaskPool(WithMaxConcurrency(1)).CancelFistError(context.TODO(), []*Task{task1, task2})
 
 		assert.Nil(t, res)
 		assert.Len(t, order, 2)
@@ -215,7 +215,7 @@ func TestTaskPool_FirstAwait(t *testing.T) {
 			return nil
 		}, task1)
 
-		res := NewTaskPool().FirstAwait(context.TODO(), task2, task1)
+		res := NewTaskPool().CancelFistError(context.TODO(), []*Task{task2, task1})
 
 		assert.Nil(t, res)
 		assert.Len(t, order, 2)
@@ -224,7 +224,7 @@ func TestTaskPool_FirstAwait(t *testing.T) {
 	})
 
 	t.Run("no tasks", func(t *testing.T) {
-		res := NewTaskPool().FirstAwait(context.TODO())
+		res := NewTaskPool().CancelFistError(context.TODO(), nil)
 
 		assert.Nil(t, res)
 	})
@@ -237,10 +237,10 @@ func TestTaskPool_FirstAwait(t *testing.T) {
 			return nil
 		})
 
-		res := NewTaskPool().FirstAwait(context.TODO(), task1, task2)
+		res := NewTaskPool().CancelFistError(context.TODO(), []*Task{task1, task2})
 
 		assert.Error(t, res)
-		var panicErr PanicError
+		var panicErr *PanicError
 		assert.ErrorAs(t, res, &panicErr)
 		assert.Equal(t, 42, panicErr.Val)
 		assert.NotEmpty(t, panicErr.Stack)
@@ -261,7 +261,7 @@ func TestTaskPool_First(t *testing.T) {
 		})
 
 		start := time.Now()
-		res := NewTaskPool().First(context.TODO(), task1, task2)
+		res := NewTaskPool().AbortFirstError(context.TODO(), []*Task{task1, task2})
 		elapsed := time.Since(start)
 
 		assert.ErrorIs(t, res, err1)
@@ -277,7 +277,7 @@ func TestTaskPool_First(t *testing.T) {
 			return nil
 		})
 
-		res := NewTaskPool().First(context.TODO(), task1, task2)
+		res := NewTaskPool().AbortFirstError(context.TODO(), []*Task{task1, task2})
 
 		assert.Nil(t, res)
 	})
@@ -292,7 +292,7 @@ func TestTaskPool_First(t *testing.T) {
 			return nil
 		})
 
-		res := NewTaskPool(WithTimeout(time.Nanosecond)).First(context.TODO(), task1, task2)
+		res := NewTaskPool(WithTimeout(time.Nanosecond)).AbortFirstError(context.TODO(), []*Task{task1, task2})
 		close(done)
 
 		assert.ErrorIs(t, res, ErrTimeout)
@@ -310,7 +310,7 @@ func TestTaskPool_First(t *testing.T) {
 			return nil
 		})
 
-		res := NewTaskPool(WithMaxConcurrency(1)).First(context.TODO(), task1, task2)
+		res := NewTaskPool(WithMaxConcurrency(1)).AbortFirstError(context.TODO(), []*Task{task1, task2})
 
 		assert.Nil(t, res)
 		assert.Len(t, order, 2)
@@ -329,7 +329,7 @@ func TestTaskPool_First(t *testing.T) {
 			return nil
 		}, task1)
 
-		res := NewTaskPool().First(context.TODO(), task2, task1)
+		res := NewTaskPool().AbortFirstError(context.TODO(), []*Task{task2, task1})
 
 		assert.Nil(t, res)
 		assert.Len(t, order, 2)
@@ -338,7 +338,7 @@ func TestTaskPool_First(t *testing.T) {
 	})
 
 	t.Run("no tasks", func(t *testing.T) {
-		res := NewTaskPool().First(context.TODO())
+		res := NewTaskPool().AbortFirstError(context.TODO(), nil)
 
 		assert.Nil(t, res)
 	})
@@ -351,10 +351,10 @@ func TestTaskPool_First(t *testing.T) {
 			return nil
 		})
 
-		res := NewTaskPool().First(context.TODO(), task1, task2)
+		res := NewTaskPool().AbortFirstError(context.TODO(), []*Task{task1, task2})
 
 		assert.Error(t, res)
-		var panicErr PanicError
+		var panicErr *PanicError
 		assert.ErrorAs(t, res, &panicErr)
 		assert.Equal(t, 42, panicErr.Val)
 		assert.NotEmpty(t, panicErr.Stack)

@@ -22,12 +22,12 @@ task2 := concurrency.NewTask(func(ctx context.Context) error {
 })
 
 // task3 depends on task1 and task2 to complete first
-task3 := concurrency.NewTask(func(ctx context.Context) error {
+task3 := concurrency.NewTask([]*Task{func(ctx context.Context) error {
 	// read from shared memory variable r 
 	data, err := io.ReadAll(r)
 	// do something
 	return errors.New("something went wrong")
-}, task1, task2)
+}, task1, task2})
 ```
 
 These tasks can be run concurrently taking into account the given dependencies.
@@ -35,7 +35,7 @@ All tasks are executed the outcome stored and returned back to the caller.
 If all tasks run without an error `nil` is returned.
 
 ```go
-res := concurrency.AwaitAll(context.Background(), task1, task2, task3)
+res := concurrency.AwaitAll(context.Background(), []*Task{task1, task2, task3})
 if res != nil {
 	res.Error() // returns overall error message
 	errTask1 := res.GetResult(task1) // error outcome for task1
@@ -51,8 +51,8 @@ The two options below abort in the first error received.
 
 ```go
 // aborts after the first error received
-res := concurrency.First(context.Background(), task1, task2, task3)
+res := concurrency.First(context.Background(), []*Task{task1, task2, task3})
 
 // aborts after the first error received, waits for all goroutines to finish
-res := concurrency.FirstAwait(context.Background(), task1, task2, task3)
+res := concurrency.FirstAwait(context.Background(), []*Task{task1, task2, task3})
 ```

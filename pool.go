@@ -6,29 +6,35 @@ import (
 	"time"
 )
 
+// ErrTimeout returned if WithTimeout set timeout is exceeded
 var ErrTimeout = errors.New("timeout")
-
-type mode uint8
-
-const (
-	modeAbortFirst mode = 1 + iota
-	modeAbortFirstWait
-	modeWaitAll
-)
 
 type Option func(cfg *TaskPoolConfig)
 
 type TaskPoolConfig struct {
+	// MaxConcurrency number of parallel goroutines spawned from this
+	// TaskPool at the same time.
+	// Defaults to 0.
 	MaxConcurrency uint32
-	Timeout        time.Duration
+	// Timeout the overall timeout for the executions of the TaskPool.
+	// Defaults to 0.
+	Timeout time.Duration
 }
 
+// WithMaxConcurrency controls the number of spawned goroutines at the
+// same time. Will hold tasks back if the max limit is reached and waits
+// for tasks to finish. A value of 0 represents no limit.
 func WithMaxConcurrency(maxConcurrency uint32) Option {
 	return func(cfg *TaskPoolConfig) {
 		cfg.MaxConcurrency = maxConcurrency
 	}
 }
 
+// WithTimeout sets a timeout for the overall execution of all tasks.
+// Once this exceeds, context for all tasks gets canceled and no new
+// tasks will be scheduled. However, active goroutines will continue
+// to run as long as the task exits.
+// The functions will return ErrTimeout.
 func WithTimeout(timeout time.Duration) Option {
 	return func(cfg *TaskPoolConfig) {
 		cfg.Timeout = timeout
@@ -37,18 +43,23 @@ func WithTimeout(timeout time.Duration) Option {
 
 var defaultPool = NewTaskPool()
 
-func AwaitAll(ctx context.Context, tasks ...*Task) *Result {
-	return defaultPool.AwaitAll(ctx, tasks...)
+func AwaitAll(ctx context.Context, tasks []*Task) *ResultError {
+	return defaultPool.AwaitAll(ctx, tasks)
 }
 
-func First(ctx context.Context, tasks ...*Task) *Result {
-	return defaultPool.First(ctx, tasks...)
+func AbortFirstError(ctx context.Context, tasks []*Task) *ResultError {
+	return defaultPool.AbortFirstError(ctx, tasks)
 }
 
-func FirstAwait(ctx context.Context, tasks ...*Task) *Result {
-	return defaultPool.FirstAwait(ctx, tasks...)
+func CancelFistError(ctx context.Context, tasks []*Task) *ResultError {
+	return defaultPool.CancelFistError(ctx, tasks)
 }
 
+func Run(ctx context.Context, ctrl Controller, tasks []*Task) *ResultError {
+	return defaultPool.Run(ctx, ctrl, tasks)
+}
+
+// NewTaskPool creates a new custom TaskPool with the given options.
 func NewTaskPool(options ...Option) *TaskPool {
 	tp := &TaskPool{}
 	for _, option := range options {
@@ -62,22 +73,28 @@ type TaskPool struct {
 	config TaskPoolConfig
 }
 
-func (tp *TaskPool) AwaitAll(ctx context.Context, tasks ...*Task) *Result {
-	return newRun(tp, modeWaitAll, ctx, tasks).run()
+// AwaitAll runs all provided tasks and returns a potential ResultError
+// holding the individual outcomes of the tasks.
+func (tp *TaskPool) AwaitAll(ctx context.Context, tasks []*Task) *ResultError {
+	return tp.Run(ctx, AwaitAllTasks{}, tasks)
 }
 
-func (tp *TaskPool) First(ctx context.Context, tasks ...*Task) *Result {
-	return newRun(tp, modeAbortFirst, ctx, tasks).run()
+// AbortFirstError aborts and returns back to the caller after the first
+// error returned from any of the tasks. Started tasks run in the background
+// until they return from their closure.
+func (tp *TaskPool) AbortFirstError(ctx context.Context, tasks []*Task) *ResultError {
+	return tp.Run(ctx, FirstErrorAbort{}, tasks)
 }
 
-func (tp *TaskPool) FirstAwait(ctx context.Context, tasks ...*Task) *Result {
-	return newRun(tp, modeAbortFirstWait, ctx, tasks).run()
+// CancelFistError cancels all pending and running tasks after the first
+// error returned from any of tasks. In comparison with AbortFirstError,
+// this method waits for all tasks to finish before retuning to the caller.
+func (tp *TaskPool) CancelFistError(ctx context.Context, tasks []*Task) *ResultError {
+	return tp.Run(ctx, FirstErrorCancelWait{}, tasks)
 }
 
-func (tp *TaskPool) timeout() <-chan time.Time {
-	if tp.config.Timeout == 0 {
-		return nil
-	}
-
-	return time.After(tp.config.Timeout)
+// Run runs the given list of tasks using the given Controller for aborting
+// and stopping logics.
+func (tp *TaskPool) Run(ctx context.Context, ctrl Controller, tasks []*Task) *ResultError {
+	return newRun(ctx, tp, ctrl, tasks).run()
 }
