@@ -88,6 +88,11 @@ func (r *run) run() *ResultError {
 }
 
 func (r *run) handleOutcome(out outcome) bool {
+	if out.task == nil {
+		r.result.Err = out.err
+		return true
+	}
+
 	r.finishTask(out.task)
 
 	if out.err == nil {
@@ -110,11 +115,18 @@ func (r *run) start() {
 	defer close(r.counter)
 
 	if len(r.tasks) == 0 {
+		r.closeNext()
 		return
 	}
 
 	// build dependencies and reversed dependencies
-	r.buildDependencies()
+	err := r.prepare()
+	if err != nil {
+		r.outcomes <- outcome{
+			err: err,
+		}
+		return
+	}
 
 	r.wg.Add(len(r.tasks))
 	for task := range r.next {
@@ -155,10 +167,16 @@ func (r *run) runTask(task *Task) {
 	}
 }
 
-func (r *run) buildDependencies() {
+func (r *run) prepare() error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	// TODO: cyclic check
+
+	// cyclic check
+	if cyclic(r.tasks) {
+		return ErrCyclicDependencies
+	}
+
+	// build dependencies
 	for _, task := range r.tasks {
 		if len(task.DependsOn) == 0 {
 			r.next <- task
@@ -170,6 +188,8 @@ func (r *run) buildDependencies() {
 			r.revDependsOn[depends] = append(r.revDependsOn[depends], task)
 		}
 	}
+
+	return nil
 }
 
 func (r *run) finishTask(t *Task) {
@@ -197,4 +217,31 @@ func (r *run) finishTask(t *Task) {
 type outcome struct {
 	task *Task
 	err  error
+}
+
+func cyclic(tasks []*Task) bool {
+	var stack []*Task
+	var pop *Task
+	seen := make(map[*Task]struct{})
+
+	for _, task := range tasks {
+		stack = append(stack, task.DependsOn...)
+		clear(seen)
+
+		for len(stack) > 0 {
+			pop = stack[0]
+			if pop == task {
+				return true
+			}
+
+			stack = stack[1:]
+			if _, ok := seen[pop]; ok {
+				continue
+			}
+			seen[pop] = struct{}{}
+			stack = append(stack, pop.DependsOn...)
+		}
+	}
+
+	return false
 }
