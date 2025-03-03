@@ -51,8 +51,8 @@ The two options below abort in the first error received.
 
 ```go
 // aborts after the first error received
-res := concurrency.First(context.Background(), []*Task{task1, task2, task3})
+res := concurrency.AbortFirstError(context.Background(), []*Task{task1, task2, task3})
 
 // aborts after the first error received, waits for all goroutines to finish
-res := concurrency.FirstAwait(context.Background(), []*Task{task1, task2, task3})
+res := concurrency.CancelFistError(context.Background(), []*Task{task1, task2, task3})
 ```
