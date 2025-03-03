@@ -9,6 +9,10 @@ import (
 // ErrTimeout returned if WithTimeout set timeout is exceeded
 var ErrTimeout = errors.New("timeout")
 
+// ErrCyclicDependencies returned if the given tasks form a cycle
+// in the DAG.
+var ErrCyclicDependencies = errors.New("cyclic dependencies")
+
 type Option func(cfg *TaskPoolConfig)
 
 type TaskPoolConfig struct {
