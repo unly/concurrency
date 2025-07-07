@@ -4,9 +4,10 @@ import (
 	"context"
 	"fmt"
 	"runtime/debug"
-	"slices"
 	"sync"
 	"time"
+
+	"github.com/unly/go-collections"
 )
 
 func newRun(ctx context.Context, tp *TaskPool, ctrl Controller, tasks []*Task) *run {
@@ -25,8 +26,8 @@ func newRun(ctx context.Context, tp *TaskPool, ctrl Controller, tasks []*Task) *
 			close(next)
 		}),
 		counter:      createSemaphoreChannel(tp, tasks),
-		dependsOn:    make(map[*Task][]*Task),
-		revDependsOn: make(map[*Task][]*Task),
+		dependsOn:    make(map[*Task]*collections.Set[*Task]),
+		revDependsOn: make(map[*Task]*collections.Set[*Task]),
 	}
 }
 
@@ -60,8 +61,8 @@ type run struct {
 	counter      chan struct{}
 	wg           sync.WaitGroup
 	mu           sync.Mutex
-	dependsOn    map[*Task][]*Task
-	revDependsOn map[*Task][]*Task
+	dependsOn    map[*Task]*collections.Set[*Task]
+	revDependsOn map[*Task]*collections.Set[*Task]
 }
 
 func (r *run) run() *ResultError {
@@ -183,9 +184,14 @@ func (r *run) prepare() error {
 			continue
 		}
 
-		r.dependsOn[task] = task.DependsOn
+		var s collections.Set[*Task]
+		s.Add(task.DependsOn...)
+		r.dependsOn[task] = &s
 		for _, depends := range task.DependsOn {
-			r.revDependsOn[depends] = append(r.revDependsOn[depends], task)
+			if _, ok := r.revDependsOn[depends]; !ok {
+				r.revDependsOn[depends] = &collections.Set[*Task]{}
+			}
+			r.revDependsOn[depends].Add(task)
 		}
 	}
 
@@ -198,16 +204,17 @@ func (r *run) finishTask(t *Task) {
 
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	for _, dependsOnTask := range r.revDependsOn[t] {
-		r.dependsOn[dependsOnTask] = slices.DeleteFunc(r.dependsOn[dependsOnTask], func(other *Task) bool {
-			return other == t
-		})
-		if len(r.dependsOn[dependsOnTask]) == 0 {
-			r.next <- dependsOnTask
-			delete(r.dependsOn, dependsOnTask)
+	revDependsOn, ok := r.revDependsOn[t]
+	if ok {
+		for dependsOnTask := range revDependsOn.Values() {
+			r.dependsOn[dependsOnTask].Delete(t)
+			if r.dependsOn[dependsOnTask].Size() == 0 {
+				r.next <- dependsOnTask
+				delete(r.dependsOn, dependsOnTask)
+			}
 		}
+		delete(r.revDependsOn, t)
 	}
-	delete(r.revDependsOn, t)
 	// close the next task channel if there are no dependent tasks left
 	if len(r.dependsOn) == 0 {
 		r.closeNext()
@@ -219,29 +226,39 @@ type outcome struct {
 	err  error
 }
 
+const (
+	unvisited uint8 = iota
+	visiting
+	visited
+)
+
 func cyclic(tasks []*Task) bool {
-	var stack []*Task
-	var pop *Task
-	seen := make(map[*Task]struct{})
+	visited := make(map[*Task]uint8)
 
 	for _, task := range tasks {
-		stack = append(stack, task.DependsOn...)
-		clear(seen)
-
-		for len(stack) > 0 {
-			pop = stack[0]
-			if pop == task {
+		if visited[task] == unvisited {
+			if hasCycle(task, visited) {
 				return true
 			}
-
-			stack = stack[1:]
-			if _, ok := seen[pop]; ok {
-				continue
-			}
-			seen[pop] = struct{}{}
-			stack = append(stack, pop.DependsOn...)
 		}
 	}
 
+	return false
+}
+
+func hasCycle(task *Task, visitedMap map[*Task]uint8) bool {
+	visitedMap[task] = visiting
+
+	for _, dependency := range task.DependsOn {
+		if visitedMap[dependency] == visiting {
+			return true
+		}
+
+		if visitedMap[dependency] == unvisited && hasCycle(dependency, visitedMap) {
+			return true
+		}
+	}
+
+	visitedMap[task] = visited
 	return false
 }
