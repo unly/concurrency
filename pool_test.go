@@ -245,6 +245,19 @@ func TestTaskPool_FirstAwait(t *testing.T) {
 		assert.Equal(t, 42, panicErr.Val)
 		assert.NotEmpty(t, panicErr.Stack)
 	})
+
+	t.Run("double reference", func(t *testing.T) {
+		task1 := NewTask(func(_ context.Context) error {
+			return nil
+		})
+		task2 := NewTask(func(_ context.Context) error {
+			return nil
+		}, task1, task1)
+
+		res := AwaitAll(context.TODO(), []*Task{task1, task2})
+
+		assert.Nil(t, res)
+	})
 }
 
 func TestTaskPool_First(t *testing.T) {
