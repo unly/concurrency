@@ -55,8 +55,8 @@ func AbortFirstError(ctx context.Context, tasks []*Task) *ResultError {
 	return defaultPool.AbortFirstError(ctx, tasks)
 }
 
-func CancelFistError(ctx context.Context, tasks []*Task) *ResultError {
-	return defaultPool.CancelFistError(ctx, tasks)
+func CancelFirstError(ctx context.Context, tasks []*Task) *ResultError {
+	return defaultPool.CancelFirstError(ctx, tasks)
 }
 
 func Run(ctx context.Context, ctrl Controller, tasks []*Task) *ResultError {
@@ -90,10 +90,10 @@ func (tp *TaskPool) AbortFirstError(ctx context.Context, tasks []*Task) *ResultE
 	return tp.Run(ctx, FirstErrorAbort{}, tasks)
 }
 
-// CancelFistError cancels all pending and running tasks after the first
+// CancelFirstError cancels all pending and running tasks after the first
 // error returned from any of tasks. In comparison with AbortFirstError,
 // this method waits for all tasks to finish before retuning to the caller.
-func (tp *TaskPool) CancelFistError(ctx context.Context, tasks []*Task) *ResultError {
+func (tp *TaskPool) CancelFirstError(ctx context.Context, tasks []*Task) *ResultError {
 	return tp.Run(ctx, FirstErrorCancelWait{}, tasks)
 }
 

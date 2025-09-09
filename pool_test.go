@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -60,23 +61,22 @@ func TestTaskPool_AwaitAll(t *testing.T) {
 	})
 
 	t.Run("with max concurrency", func(t *testing.T) {
-		var order []int
+		var counter atomic.Int32
 		task1 := NewTask(func(_ context.Context) error {
-			time.Sleep(50 * time.Millisecond)
-			order = append(order, 1)
+			assert.Equal(t, int32(1), counter.Add(1))
+			counter.Add(-1)
 			return nil
 		})
 		task2 := NewTask(func(_ context.Context) error {
-			order = append(order, 2)
+			assert.Equal(t, int32(1), counter.Add(1))
+			counter.Add(-1)
 			return nil
 		})
 
 		res := NewTaskPool(WithMaxConcurrency(1)).AwaitAll(context.TODO(), []*Task{task1, task2})
 
 		assert.Nil(t, res)
-		assert.Len(t, order, 2)
-		assert.Equal(t, 1, order[0])
-		assert.Equal(t, 2, order[1])
+		assert.Equal(t, int32(0), counter.Load())
 	})
 
 	t.Run("order of tasks", func(t *testing.T) {
@@ -96,6 +96,19 @@ func TestTaskPool_AwaitAll(t *testing.T) {
 		assert.Len(t, order, 2)
 		assert.Equal(t, 1, order[0])
 		assert.Equal(t, 2, order[1])
+	})
+
+	t.Run("task not provided", func(t *testing.T) {
+		task1 := NewTask(func(_ context.Context) error {
+			return nil
+		})
+		task2 := NewTask(func(_ context.Context) error {
+			return nil
+		}, task1)
+
+		res := NewTaskPool().AwaitAll(context.TODO(), []*Task{task2})
+
+		assert.Nil(t, res)
 	})
 
 	t.Run("no tasks", func(t *testing.T) {
@@ -131,7 +144,7 @@ func TestTaskPool_FirstAwait(t *testing.T) {
 			return err2
 		})
 
-		res := CancelFistError(context.TODO(), []*Task{task1, task2})
+		res := CancelFirstError(context.TODO(), []*Task{task1, task2})
 
 		assert.True(t, errors.Is(res, err1) && errors.Is(res, err2))
 	})
@@ -149,7 +162,7 @@ func TestTaskPool_FirstAwait(t *testing.T) {
 			return err2
 		}, task2)
 
-		res := CancelFistError(context.TODO(), []*Task{task1, task2, task3})
+		res := CancelFirstError(context.TODO(), []*Task{task1, task2, task3})
 
 		assert.ErrorIs(t, res, err1)
 		assert.Equal(t, context.Canceled, res.GetResult(task3))
@@ -163,7 +176,7 @@ func TestTaskPool_FirstAwait(t *testing.T) {
 			return nil
 		})
 
-		res := CancelFistError(context.TODO(), []*Task{task1, task2})
+		res := CancelFirstError(context.TODO(), []*Task{task1, task2})
 
 		assert.Nil(t, res)
 	})
@@ -178,30 +191,29 @@ func TestTaskPool_FirstAwait(t *testing.T) {
 			return nil
 		})
 
-		res := NewTaskPool(WithTimeout(time.Nanosecond)).CancelFistError(context.TODO(), []*Task{task1, task2})
+		res := NewTaskPool(WithTimeout(time.Nanosecond)).CancelFirstError(context.TODO(), []*Task{task1, task2})
 		close(done)
 
 		assert.ErrorIs(t, res, ErrTimeout)
 	})
 
 	t.Run("with max concurrency", func(t *testing.T) {
-		var order []int
+		var counter atomic.Int32
 		task1 := NewTask(func(_ context.Context) error {
-			time.Sleep(50 * time.Millisecond)
-			order = append(order, 1)
+			assert.Equal(t, int32(1), counter.Add(1))
+			counter.Add(-1)
 			return nil
 		})
 		task2 := NewTask(func(_ context.Context) error {
-			order = append(order, 2)
+			assert.Equal(t, int32(1), counter.Add(1))
+			counter.Add(-1)
 			return nil
 		})
 
-		res := NewTaskPool(WithMaxConcurrency(1)).CancelFistError(context.TODO(), []*Task{task1, task2})
+		res := NewTaskPool(WithMaxConcurrency(1)).CancelFirstError(context.TODO(), []*Task{task1, task2})
 
 		assert.Nil(t, res)
-		assert.Len(t, order, 2)
-		assert.Equal(t, 1, order[0])
-		assert.Equal(t, 2, order[1])
+		assert.Equal(t, int32(0), counter.Load())
 	})
 
 	t.Run("order of tasks", func(t *testing.T) {
@@ -215,7 +227,7 @@ func TestTaskPool_FirstAwait(t *testing.T) {
 			return nil
 		}, task1)
 
-		res := CancelFistError(context.TODO(), []*Task{task2, task1})
+		res := CancelFirstError(context.TODO(), []*Task{task2, task1})
 
 		assert.Nil(t, res)
 		assert.Len(t, order, 2)
@@ -224,7 +236,7 @@ func TestTaskPool_FirstAwait(t *testing.T) {
 	})
 
 	t.Run("no tasks", func(t *testing.T) {
-		res := CancelFistError(context.TODO(), nil)
+		res := CancelFirstError(context.TODO(), nil)
 
 		assert.Nil(t, res)
 	})
@@ -237,7 +249,7 @@ func TestTaskPool_FirstAwait(t *testing.T) {
 			return nil
 		})
 
-		res := CancelFistError(context.TODO(), []*Task{task1, task2})
+		res := CancelFirstError(context.TODO(), []*Task{task1, task2})
 
 		assert.Error(t, res)
 		var panicErr *PanicError
@@ -312,23 +324,22 @@ func TestTaskPool_First(t *testing.T) {
 	})
 
 	t.Run("with max concurrency", func(t *testing.T) {
-		var order []int
+		var counter atomic.Int32
 		task1 := NewTask(func(_ context.Context) error {
-			time.Sleep(50 * time.Millisecond)
-			order = append(order, 1)
+			assert.Equal(t, int32(1), counter.Add(1))
+			counter.Add(-1)
 			return nil
 		})
 		task2 := NewTask(func(_ context.Context) error {
-			order = append(order, 2)
+			assert.Equal(t, int32(1), counter.Add(1))
+			counter.Add(-1)
 			return nil
 		})
 
 		res := NewTaskPool(WithMaxConcurrency(1)).AbortFirstError(context.TODO(), []*Task{task1, task2})
 
 		assert.Nil(t, res)
-		assert.Len(t, order, 2)
-		assert.Equal(t, 1, order[0])
-		assert.Equal(t, 2, order[1])
+		assert.Equal(t, int32(0), counter.Load())
 	})
 
 	t.Run("order of tasks", func(t *testing.T) {
