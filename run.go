@@ -13,6 +13,17 @@ import (
 func newRun(ctx context.Context, tp *TaskPool, ctrl Controller, tasks []*Task) *run {
 	ctx, cancel := context.WithCancel(ctx)
 	next := make(chan *Task, len(tasks))
+
+	var s collections.Set[*Task]
+	s.Add(tasks...)
+	for _, task := range tasks {
+		s.Add(task.DependsOn...)
+	}
+	tasks = make([]*Task, 0, s.Size())
+	for task := range s.Values() {
+		tasks = append(tasks, task)
+	}
+
 	return &run{
 		pool:     tp,
 		ctx:      ctx,
@@ -29,14 +40,6 @@ func newRun(ctx context.Context, tp *TaskPool, ctrl Controller, tasks []*Task) *
 		dependsOn:    make(map[*Task]*collections.Set[*Task]),
 		revDependsOn: make(map[*Task]*collections.Set[*Task]),
 	}
-}
-
-func createTimeoutChannel(tp *TaskPool) <-chan time.Time {
-	if tp.config.Timeout == 0 {
-		return nil
-	}
-
-	return time.After(tp.config.Timeout)
 }
 
 func createSemaphoreChannel(tp *TaskPool, tasks []*Task) chan struct{} {
@@ -70,7 +73,13 @@ func (r *run) run() *ResultError {
 
 	go r.start()
 
-	timeout := createTimeoutChannel(r.pool)
+	var timeout <-chan time.Time
+	if r.pool.config.Timeout > 0 {
+		timer := time.NewTimer(r.pool.config.Timeout)
+		defer timer.Stop()
+		timeout = timer.C
+	}
+
 	for {
 		select {
 		case <-timeout:
@@ -184,9 +193,9 @@ func (r *run) prepare() error {
 			continue
 		}
 
-		var s collections.Set[*Task]
+		s := &collections.Set[*Task]{}
 		s.Add(task.DependsOn...)
-		r.dependsOn[task] = &s
+		r.dependsOn[task] = s
 		for _, depends := range task.DependsOn {
 			if _, ok := r.revDependsOn[depends]; !ok {
 				r.revDependsOn[depends] = &collections.Set[*Task]{}
