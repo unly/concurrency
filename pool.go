@@ -47,19 +47,19 @@ func WithTimeout(timeout time.Duration) Option {
 
 var defaultPool = NewTaskPool()
 
-func AwaitAll(ctx context.Context, tasks []*Task) *ResultError {
+func AwaitAll(ctx context.Context, tasks []*Task) (*Result, error) {
 	return defaultPool.AwaitAll(ctx, tasks)
 }
 
-func AbortFirstError(ctx context.Context, tasks []*Task) *ResultError {
+func AbortFirstError(ctx context.Context, tasks []*Task) (*Result, error) {
 	return defaultPool.AbortFirstError(ctx, tasks)
 }
 
-func CancelFirstError(ctx context.Context, tasks []*Task) *ResultError {
+func CancelFirstError(ctx context.Context, tasks []*Task) (*Result, error) {
 	return defaultPool.CancelFirstError(ctx, tasks)
 }
 
-func Run(ctx context.Context, ctrl Controller, tasks []*Task) *ResultError {
+func Run(ctx context.Context, ctrl Controller, tasks []*Task) (*Result, error) {
 	return defaultPool.Run(ctx, ctrl, tasks)
 }
 
@@ -77,28 +77,28 @@ type TaskPool struct {
 	config TaskPoolConfig
 }
 
-// AwaitAll runs all provided tasks and returns a potential ResultError
+// AwaitAll runs all provided tasks and returns a potential Result
 // holding the individual outcomes of the tasks.
-func (tp *TaskPool) AwaitAll(ctx context.Context, tasks []*Task) *ResultError {
+func (tp *TaskPool) AwaitAll(ctx context.Context, tasks []*Task) (*Result, error) {
 	return tp.Run(ctx, AwaitAllTasks{}, tasks)
 }
 
 // AbortFirstError aborts and returns back to the caller after the first
 // error returned from any of the tasks. Started tasks run in the background
 // until they return from their closure.
-func (tp *TaskPool) AbortFirstError(ctx context.Context, tasks []*Task) *ResultError {
+func (tp *TaskPool) AbortFirstError(ctx context.Context, tasks []*Task) (*Result, error) {
 	return tp.Run(ctx, FirstErrorAbort{}, tasks)
 }
 
 // CancelFirstError cancels all pending and running tasks after the first
 // error returned from any of tasks. In comparison with AbortFirstError,
 // this method waits for all tasks to finish before retuning to the caller.
-func (tp *TaskPool) CancelFirstError(ctx context.Context, tasks []*Task) *ResultError {
+func (tp *TaskPool) CancelFirstError(ctx context.Context, tasks []*Task) (*Result, error) {
 	return tp.Run(ctx, FirstErrorCancelWait{}, tasks)
 }
 
 // Run runs the given list of tasks using the given Controller for aborting
 // and stopping logics.
-func (tp *TaskPool) Run(ctx context.Context, ctrl Controller, tasks []*Task) *ResultError {
+func (tp *TaskPool) Run(ctx context.Context, ctrl Controller, tasks []*Task) (*Result, error) {
 	return newRun(ctx, tp, ctrl, tasks).run()
 }

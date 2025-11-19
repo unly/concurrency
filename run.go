@@ -3,6 +3,7 @@ package concurrency
 import (
 	"context"
 	"fmt"
+	"maps"
 	"runtime/debug"
 	"sync"
 	"time"
@@ -12,63 +13,51 @@ import (
 
 func newRun(ctx context.Context, tp *TaskPool, ctrl Controller, tasks []*Task) *run {
 	ctx, cancel := context.WithCancel(ctx)
-	next := make(chan *Task, len(tasks))
-
-	var s collections.Set[*Task]
-	s.Add(tasks...)
-	for _, task := range tasks {
-		s.Add(task.DependsOn...)
-	}
-	tasks = make([]*Task, 0, s.Size())
-	for task := range s.Values() {
-		tasks = append(tasks, task)
-	}
 
 	return &run{
-		pool:     tp,
-		ctx:      ctx,
-		cancel:   cancel,
-		ctrl:     ctrl,
-		result:   newResult(),
-		tasks:    tasks,
-		outcomes: make(chan outcome, len(tasks)),
-		next:     next,
-		closeNext: sync.OnceFunc(func() {
-			close(next)
-		}),
-		counter:      createSemaphoreChannel(tp, tasks),
-		dependsOn:    make(map[*Task]*collections.Set[*Task]),
-		revDependsOn: make(map[*Task]*collections.Set[*Task]),
+		pool:           tp,
+		ctx:            ctx,
+		cancel:         cancel,
+		ctrl:           ctrl,
+		result:         newResult(),
+		tasks:          tasks,
+		startCompleted: make(chan struct{}),
+		completed:      make(chan struct{}),
+		dependsOn:      make(map[*Task]*collections.Set[*Task]),
+		revDependsOn:   make(map[*Task]*collections.Set[*Task]),
 	}
 }
 
-func createSemaphoreChannel(tp *TaskPool, tasks []*Task) chan struct{} {
-	maxConcurrency := tp.config.MaxConcurrency
+func createSemaphoreChannel(tp *TaskPool, total int) chan struct{} {
+	maxConcurrency := int(tp.config.MaxConcurrency)
 	if maxConcurrency == 0 {
-		maxConcurrency = uint32(len(tasks))
+		maxConcurrency = total
 	}
 
 	return make(chan struct{}, maxConcurrency)
 }
 
 type run struct {
-	pool         *TaskPool
-	ctx          context.Context
-	cancel       context.CancelFunc
-	result       *ResultError
-	ctrl         Controller
-	tasks        []*Task
-	outcomes     chan outcome
-	next         chan *Task
-	closeNext    func()
-	counter      chan struct{}
-	wg           sync.WaitGroup
-	mu           sync.Mutex
-	dependsOn    map[*Task]*collections.Set[*Task]
-	revDependsOn map[*Task]*collections.Set[*Task]
+	pool           *TaskPool
+	ctx            context.Context
+	cancel         context.CancelFunc
+	result         *Result
+	ctrl           Controller
+	tasks          []*Task
+	outcomes       chan outcome
+	next           chan *Task
+	closeNextOnce  sync.Once
+	counter        chan struct{}
+	startCompleted chan struct{}
+	completed      chan struct{}
+	closeCompleted sync.Once
+	wg             sync.WaitGroup
+	mu             sync.Mutex
+	dependsOn      map[*Task]*collections.Set[*Task]
+	revDependsOn   map[*Task]*collections.Set[*Task]
 }
 
-func (r *run) run() *ResultError {
+func (r *run) run() (*Result, error) {
 	defer r.cancel()
 
 	go r.start()
@@ -80,68 +69,68 @@ func (r *run) run() *ResultError {
 		timeout = timer.C
 	}
 
-	for {
-		select {
-		case <-timeout:
-			r.result.Err = ErrTimeout
-			return r.result.build()
-		case out, open := <-r.outcomes:
-			if !open {
-				return r.result.build()
-			}
-
-			if r.handleOutcome(out) {
-				return r.result.build()
-			}
-		}
+	select {
+	case <-timeout:
+		r.result.setError(ErrTimeout)
+		r.cancel()
+	case <-r.completed:
+		// nothing to do
 	}
+
+	return r.result, r.result.Err()
 }
 
-func (r *run) handleOutcome(out outcome) bool {
-	if out.task == nil {
-		r.result.Err = out.err
-		return true
-	}
+func (r *run) handleOutcome(out outcome) {
+	defer r.wg.Done()
+	defer r.finishTask(out.task)
 
-	r.finishTask(out.task)
+	r.result.setResult(out.task, out.err)
 
 	if out.err == nil {
-		return false
+		return
 	}
-
-	r.result.Errors[out.task] = out.err
 
 	abort := r.ctrl.EarlyAbort(r.ctx, out.task, out.err)
 	if abort || r.ctrl.Cancel(r.ctx, out.task, out.err) {
 		r.cancel()
-		r.result.Err = fmt.Errorf("canceled after: %w", out.err)
+		r.result.setError(fmt.Errorf("canceled after: %w", out.err))
 	}
-
-	return abort
+	if abort {
+		r.abort()
+	}
 }
 
 func (r *run) start() {
+	defer close(r.startCompleted)
+	// iterate graph and check cyclic dependencies
+	err := r.iterateGraph()
+	if err != nil {
+		r.result.setError(err)
+		r.abort()
+		return
+	}
+
+	total := len(r.tasks)
+	if total == 0 {
+		r.abort()
+		return
+	}
+
+	r.outcomes = make(chan outcome, total)
+	r.next = make(chan *Task, total)
+	r.counter = createSemaphoreChannel(r.pool, total)
 	defer close(r.outcomes)
 	defer close(r.counter)
 
-	if len(r.tasks) == 0 {
-		r.closeNext()
-		return
-	}
+	go r.listen()
 
 	// build dependencies and reversed dependencies
-	err := r.prepare()
-	if err != nil {
-		r.outcomes <- outcome{
-			err: err,
-		}
-		return
-	}
+	r.prepare()
 
-	r.wg.Add(len(r.tasks))
 	for task := range r.next {
 		r.counter <- struct{}{}
 
+		r.wg.Add(1)
 		select {
 		case <-r.ctx.Done():
 			// don't start tasks if already aborted
@@ -155,6 +144,16 @@ func (r *run) start() {
 	}
 
 	r.wg.Wait()
+}
+
+func (r *run) listen() {
+	defer r.abort()
+
+	for out := range r.outcomes {
+		r.handleOutcome(out)
+	}
+
+	<-r.startCompleted
 }
 
 func (r *run) runTask(task *Task) {
@@ -177,19 +176,13 @@ func (r *run) runTask(task *Task) {
 	}
 }
 
-func (r *run) prepare() error {
+func (r *run) prepare() {
 	r.mu.Lock()
-	defer r.mu.Unlock()
-
-	// cyclic check
-	if cyclic(r.tasks) {
-		return ErrCyclicDependencies
-	}
-
+	var ready []*Task
 	// build dependencies
 	for _, task := range r.tasks {
 		if len(task.DependsOn) == 0 {
-			r.next <- task
+			ready = append(ready, task)
 			continue
 		}
 
@@ -203,31 +196,55 @@ func (r *run) prepare() error {
 			r.revDependsOn[depends].Add(task)
 		}
 	}
+	r.mu.Unlock()
 
-	return nil
+	for _, t := range ready {
+		r.sendNext(t)
+	}
 }
 
 func (r *run) finishTask(t *Task) {
-	defer r.wg.Done()
 	<-r.counter
 
 	r.mu.Lock()
-	defer r.mu.Unlock()
 	revDependsOn, ok := r.revDependsOn[t]
+	var ready []*Task
 	if ok {
 		for dependsOnTask := range revDependsOn.Values() {
 			r.dependsOn[dependsOnTask].Delete(t)
 			if r.dependsOn[dependsOnTask].Size() == 0 {
-				r.next <- dependsOnTask
+				ready = append(ready, dependsOnTask)
 				delete(r.dependsOn, dependsOnTask)
 			}
 		}
 		delete(r.revDependsOn, t)
 	}
-	// close the next task channel if there are no dependent tasks left
-	if len(r.dependsOn) == 0 {
+	completed := len(r.dependsOn) == 0
+	r.mu.Unlock()
+
+	for _, rt := range ready {
+		r.sendNext(rt)
+	}
+
+	if completed {
 		r.closeNext()
 	}
+}
+
+func (r *run) sendNext(task *Task) {
+	r.next <- task
+}
+
+func (r *run) closeNext() {
+	r.closeNextOnce.Do(func() {
+		close(r.next)
+	})
+}
+
+func (r *run) abort() {
+	r.closeCompleted.Do(func() {
+		close(r.completed)
+	})
 }
 
 type outcome struct {
@@ -241,33 +258,35 @@ const (
 	visited
 )
 
-func cyclic(tasks []*Task) bool {
-	visited := make(map[*Task]uint8)
+func (r *run) iterateGraph() error {
+	seen := make(map[*Task]uint8)
 
-	for _, task := range tasks {
-		if visited[task] == unvisited {
-			if hasCycle(task, visited) {
-				return true
+	for _, task := range r.tasks {
+		if seen[task] == unvisited {
+			if hasCycle(task, seen) {
+				return ErrCyclicDependencies
 			}
 		}
 	}
 
-	return false
+	r.tasks = collections.Collect(maps.Keys(seen), len(seen))
+
+	return nil
 }
 
-func hasCycle(task *Task, visitedMap map[*Task]uint8) bool {
-	visitedMap[task] = visiting
+func hasCycle(task *Task, seen map[*Task]uint8) bool {
+	seen[task] = visiting
 
 	for _, dependency := range task.DependsOn {
-		if visitedMap[dependency] == visiting {
+		if seen[dependency] == visiting {
 			return true
 		}
 
-		if visitedMap[dependency] == unvisited && hasCycle(dependency, visitedMap) {
+		if seen[dependency] == unvisited && hasCycle(dependency, seen) {
 			return true
 		}
 	}
 
-	visitedMap[task] = visited
+	seen[task] = visited
 	return false
 }
