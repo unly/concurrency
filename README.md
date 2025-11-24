@@ -35,13 +35,11 @@ All tasks are executed the outcome stored and returned back to the caller.
 If all tasks run without an error `nil` is returned.
 
 ```go
-res := concurrency.AwaitAll(context.Background(), []*Task{task1, task2, task3})
-if res != nil {
-	res.Error() // returns overall error message
+res, err := concurrency.AwaitAll(context.Background(), []*Task{task1, task2, task3})
+if err != nil {
 	errTask1 := res.GetResult(task1) // error outcome for task1
 	
-	// res can be used as error
-	return res
+	return err
 }
 // all tasks are executed without an error
 ```
@@ -51,8 +49,8 @@ The two options below abort in the first error received.
 
 ```go
 // aborts after the first error received
-res := concurrency.AbortFirstError(context.Background(), []*Task{task1, task2, task3})
+res, err := concurrency.AbortFirstError(context.Background(), []*Task{task1, task2, task3})
 
 // aborts after the first error received, waits for all goroutines to finish
-res := concurrency.CancelFirstError(context.Background(), []*Task{task1, task2, task3})
+res, err := concurrency.CancelFirstError(context.Background(), []*Task{task1, task2, task3})
 ```
