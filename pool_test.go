@@ -446,9 +446,18 @@ func TestTaskPool_Run(t *testing.T) {
 		task3 := NewTask(nop, task2)
 		task1.DependsOn = []*Task{task3}
 
-		_, err := Run(context.TODO(), AwaitAllTasks{}, []*Task{task1, task2, task3})
+		res, err := Run(context.TODO(), AwaitAllTasks{}, []*Task{task1, task2, task3})
 
 		assert.ErrorIs(t, err, ErrCyclicDependencies)
+
+		select {
+		case perr := <-res.GetPromise(task1):
+			assert.ErrorIs(t, perr, ErrCyclicDependencies)
+		case <-time.After(time.Second):
+			t.Fatal("promise blocked after cyclic dependency error")
+		}
+		_, ok := res.GetResult(task1)
+		assert.False(t, ok)
 	})
 
 	t.Run("cyclic identity", func(t *testing.T) {

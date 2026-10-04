@@ -102,4 +102,52 @@ func TestResult_GetPromise(t *testing.T) {
 		err = <-ch2
 		assert.Equal(t, assert.AnError, err)
 	})
+
+	t.Run("sealed result resolves new promise", func(t *testing.T) {
+		r := newResult()
+		r.seal(assert.AnError)
+
+		assert.Equal(t, assert.AnError, <-r.GetPromise(&Task{}))
+	})
+
+	t.Run("sealed result keeps recorded outcome", func(t *testing.T) {
+		task1 := &Task{}
+		r := newResult()
+		r.setResult(task1, err1)
+		r.seal(assert.AnError)
+
+		assert.Equal(t, err1, <-r.GetPromise(task1))
+	})
+}
+
+func TestResult_seal(t *testing.T) {
+	t.Run("resolves pending promises", func(t *testing.T) {
+		task1 := &Task{}
+		r := newResult()
+		ch1 := r.GetPromise(task1)
+		ch2 := r.GetPromise(&Task{})
+
+		r.seal(assert.AnError)
+
+		assert.Equal(t, assert.AnError, <-ch1)
+		assert.Equal(t, assert.AnError, <-ch2)
+		assert.Empty(t, r.promises)
+	})
+
+	t.Run("sets run error and keeps existing one", func(t *testing.T) {
+		r := newResult()
+		r.seal(assert.AnError)
+		r.seal(err1)
+
+		assert.Equal(t, assert.AnError, r.Err())
+	})
+
+	t.Run("leaves task outcomes unset", func(t *testing.T) {
+		task1 := &Task{}
+		r := newResult()
+		r.seal(assert.AnError)
+
+		_, ok := r.GetResult(task1)
+		assert.False(t, ok)
+	})
 }

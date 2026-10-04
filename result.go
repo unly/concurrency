@@ -21,6 +21,9 @@ type Result struct {
 	promises map[*Task][]chan<- error
 	// err is the overall error used for the Err method
 	err error
+	// sealed is set if the run ended without executing any task. Pending
+	// and future promises resolve with err instead of waiting.
+	sealed bool
 
 	mu sync.Mutex
 }
@@ -38,7 +41,9 @@ func (r *Result) GetResult(t *Task) (error, bool) {
 
 // GetPromise returns a read only channel of size 1. If the
 // outcome is already available the error is in that channel
-// otherwise it will be written once available.
+// otherwise it will be written once available. If the run
+// failed before executing any task (e.g. cyclic dependencies)
+// the channel holds the error of the run.
 func (r *Result) GetPromise(t *Task) <-chan error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
@@ -47,6 +52,12 @@ func (r *Result) GetPromise(t *Task) <-chan error {
 	err, ok := r.errors[t]
 	if ok {
 		ch <- err
+		close(ch)
+		return ch
+	}
+
+	if r.sealed {
+		ch <- r.err
 		close(ch)
 		return ch
 	}
@@ -84,6 +95,26 @@ func (r *Result) setError(err error) {
 
 	if r.err == nil {
 		r.err = err
+	}
+}
+
+// seal marks the run as finished without executing any task and
+// resolves all pending promises with err.
+func (r *Result) seal(err error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	if r.err == nil {
+		r.err = err
+	}
+	r.sealed = true
+
+	for t, chs := range r.promises {
+		for _, ch := range chs {
+			ch <- r.err
+			close(ch)
+		}
+		delete(r.promises, t)
 	}
 }
 

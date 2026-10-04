@@ -105,7 +105,7 @@ func (r *run) start() {
 	// iterate graph and check cyclic dependencies
 	err := r.iterateGraph()
 	if err != nil {
-		r.result.setError(err)
+		r.result.seal(err)
 		r.abort()
 		return
 	}
