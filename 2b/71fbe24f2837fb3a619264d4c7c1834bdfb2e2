@@ -1,0 +1,29 @@
+result.go
+  s_ad1ebf3cbc9461::t_1b9627bd4a5d1d 24-26
+  s_ad1ebf3cbc9461::t_b0ae073ce3adf8 44-46,59-60
+  s_ad1ebf3cbc9461::t_506fd53efd15cb 63,101-120
+  s_ad1ebf3cbc9461::t_b80c5dab825ac8 61-62
+  s_ad1ebf3cbc9461::t_867af7e9b1bb05 64
+run.go
+  s_ad1ebf3cbc9461::t_691db8db21a5dd 108
+result_test.go
+  s_ad1ebf3cbc9461::t_1f9d4914bffe90 105-152
+pool_test.go
+  s_ad1ebf3cbc9461::t_3fe3952d4a22ad 449,452-460
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "2b71fbe24f2837fb3a619264d4c7c1834bdfb2e2",
+  "prompts": {},
+  "sessions": {
+    "s_ad1ebf3cbc9461": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "277690b8-4a2f-4b46-bfa9-93087c98cc9a",
+        "model": "claude-sonnet-5-5"
+      },
+      "human_author": "unly <unly.dev@posteo.me>"
+    }
+  }
+}
